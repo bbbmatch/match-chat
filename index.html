@@ -55,6 +55,8 @@
   .msg.me{ align-self:flex-end; background:var(--bubble-me); color:#fff; border-bottom-right-radius:4px; }
   .msg.other{ align-self:flex-start; background:var(--bubble-other); color:#333; border-bottom-left-radius:4px; }
   .msg.system{ align-self:center; background:transparent; color:var(--sub); font-size:12px; text-align:center; max-width:100%; }
+  .msg img{ max-width:100%; border-radius:12px; display:block; margin-top:2px; cursor:pointer; }
+  .msg.uploading{ opacity:.5; }
   .composer{ display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); }
   .composer input{ flex:1; }
   .composer button{ width:auto; padding:12px 18px; }
@@ -144,15 +146,20 @@
   <!-- GUEST/ADMIN CHAT -->
   <div id="screen-chat" class="screen hidden" style="padding:0;">
     <div class="chat-header">
-      <div>
-        <div class="name" id="chatPartnerName">-</div>
-        <div class="info" id="chatMeta">-</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button id="backToListBtn" onclick="backToAdminList()" style="display:none;background:none;border:none;font-size:20px;cursor:pointer;padding:0 4px 0 0;color:var(--text);">←</button>
+        <div>
+          <div class="name" id="chatPartnerName">-</div>
+          <div class="info" id="chatMeta">-</div>
+        </div>
       </div>
       <button class="btn danger" id="closeRoomBtn" style="width:auto;padding:8px 14px;font-size:12px;display:none;" onclick="closeCurrentRoom()">방 종료</button>
     </div>
     <div class="messages" id="messages"></div>
     <div id="closedNotice" class="hidden" style="text-align:center;color:var(--sub);font-size:13px;padding:10px;">이 대화방은 종료되었습니다.</div>
     <div class="composer" id="composer">
+      <input type="file" id="imgInput" accept="image/*" style="display:none;" onchange="handleImagePick(event)">
+      <button type="button" onclick="document.getElementById('imgInput').click()" style="width:auto;padding:12px 14px;background:#fff;border:1.5px solid var(--border);border-radius:10px;font-size:16px;">📷</button>
       <input type="text" id="msgInput" placeholder="메시지를 입력하세요" onkeydown="if(event.key==='Enter')sendMessage()">
       <button class="btn" onclick="sendMessage()">전송</button>
     </div>
@@ -324,6 +331,7 @@ async function enterGuestRoom(roomId){
   currentRole = 'guest';
   showScreen('chat');
   document.getElementById('closeRoomBtn').style.display = 'none';
+  document.getElementById('backToListBtn').style.display = 'none';
 
   const roomSnap = await getDoc(doc(db, 'rooms', roomId));
   const room = roomSnap.data();
@@ -359,12 +367,67 @@ function watchMessages(roomId, viewRole){
       const bubble = document.createElement('div');
       const mine = (viewRole === 'guest' && m.sender === 'guest') || (viewRole === 'admin' && m.sender === 'admin');
       bubble.className = 'msg ' + (mine ? 'me' : 'other');
-      bubble.innerHTML = '<div class="sender">' + escapeHtml(m.name || (m.sender==='admin'?'매니저':'게스트')) + '</div>' + escapeHtml(m.text || '');
+      const senderLabel = '<div class="sender">' + escapeHtml(m.name || (m.sender==='admin'?'매니저':'게스트')) + '</div>';
+      if (m.type === 'image' && m.imageData) {
+        bubble.innerHTML = senderLabel + '<img src="' + m.imageData + '" onclick="window.open(this.src)">';
+      } else {
+        bubble.innerHTML = senderLabel + escapeHtml(m.text || '');
+      }
       box.appendChild(bubble);
     });
     box.scrollTop = box.scrollHeight;
   });
 }
+
+// ====== 이미지 첨부 ======
+function resizeAndCompress(file, maxDim, quality){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > height && width > maxDim) { height = height * (maxDim / width); width = maxDim; }
+      else if (height > maxDim) { width = width * (maxDim / height); height = maxDim; }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+window.handleImagePick = async function(event){
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file || !currentRoomId) return;
+
+  let dataUrl = await resizeAndCompress(file, 900, 0.6);
+  // Firestore 문서 용량(256KB) 안에 들어오도록 필요하면 더 압축
+  let quality = 0.6, maxDim = 900;
+  while (dataUrl.length > 220000 && quality > 0.2) {
+    quality -= 0.15; maxDim = Math.max(400, maxDim - 150);
+    dataUrl = await resizeAndCompress(file, maxDim, quality);
+  }
+  if (dataUrl.length > 260000) {
+    alert('이미지 용량이 너무 커서 전송할 수 없어요. 다른 사진으로 시도해주세요.');
+    return;
+  }
+
+  const senderName = currentRole === 'admin' ? adminName : '나';
+  try {
+    await addDoc(collection(db, 'rooms', currentRoomId, 'messages'), {
+      sender: currentRole, name: senderName, type: 'image', imageData: dataUrl,
+      createdAt: serverTimestamp()
+    });
+  } catch (e) {
+    console.error(e);
+    alert('이미지 전송에 실패했어요.');
+  }
+};
 
 window.sendMessage = async function(){
   const input = document.getElementById('msgInput');
@@ -423,11 +486,15 @@ function enterAdminRoom(roomId, room){
   document.getElementById('chatMeta').textContent = `${room.gender||''} · ${room.age||''}세(${room.birthYear||'-'}) · ${room.height?room.height+'cm':'-'} · ${room.mbti||'-'} · ${room.company||'-'}`;
   document.getElementById('closedNotice').classList.toggle('hidden', room.status !== 'closed');
   document.getElementById('composer').classList.toggle('hidden', room.status === 'closed');
+  document.getElementById('backToListBtn').style.display = 'block';
   watchMessages(roomId, 'admin');
-
-  // back button behavior: reuse header title click
-  document.getElementById('headerTitle').onclick = () => { showScreen('admin'); document.getElementById('headerTitle').onclick=null; };
 }
+
+window.backToAdminList = function(){
+  if (unsubMessages) { unsubMessages(); unsubMessages = null; }
+  currentRoomId = null;
+  showScreen('admin');
+};
 
 window.closeCurrentRoom = async function(){
   if (!currentRoomId) return;

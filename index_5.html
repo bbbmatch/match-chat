@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>익명 매칭 채팅</title>
+<style>
+  :root{
+    --bg:#faf8f5; --panel:#fff; --accent:#6c5ce7; --accent-dark:#5a4bd1;
+    --text:#222; --sub:#888; --border:#eee; --bubble-me:#6c5ce7; --bubble-other:#f1f0f5;
+    --danger:#e74c3c;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+    background:var(--bg); color:var(--text); min-height:100vh;
+  }
+  .wrap{ max-width:480px; margin:0 auto; min-height:100vh; background:var(--panel); display:flex; flex-direction:column; box-shadow:0 0 24px rgba(0,0,0,0.04); }
+  header{ padding:16px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+  header h1{ font-size:17px; margin:0; }
+  header .sub{ font-size:12px; color:var(--sub); }
+  .screen{ flex:1; display:flex; flex-direction:column; padding:20px; }
+  .hidden{ display:none !important; }
+
+  /* Landing */
+  .landing{ flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; gap:16px; padding:20px;}
+  .landing h2{ font-size:22px; margin:0 0 4px; }
+  .landing p{ color:var(--sub); font-size:14px; line-height:1.6; margin:0; }
+  .btn{ background:var(--accent); color:#fff; border:none; border-radius:12px; padding:14px 24px; font-size:15px; font-weight:600; cursor:pointer; width:100%; }
+  .btn:active{ background:var(--accent-dark); }
+  .btn.secondary{ background:#fff; color:var(--accent); border:1.5px solid var(--accent); }
+  .btn.danger{ background:var(--danger); }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+
+  /* Form */
+  .form-group{ margin-bottom:14px; }
+  label{ display:block; font-size:13px; font-weight:600; margin-bottom:6px; color:#444; }
+  input[type=text], input[type=number], textarea, select{
+    width:100%; padding:12px 14px; border:1.5px solid var(--border); border-radius:10px; font-size:14px; font-family:inherit; background:#fcfcfc;
+  }
+  textarea{ resize:none; height:60px; }
+  .radio-row{ display:flex; gap:8px; }
+  .radio-row label{ flex:1; border:1.5px solid var(--border); border-radius:10px; padding:10px; text-align:center; font-weight:500; cursor:pointer; margin:0; font-size:13px; color:#555; }
+  .radio-row input{ display:none; }
+  .radio-row input:checked + span, .radio-row label:has(input:checked){ border-color:var(--accent); color:var(--accent); background:#f4f2ff; }
+  .form-foot{ margin-top:auto; padding-top:20px; }
+
+  /* Chat */
+  .chat-header{ padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+  .chat-header .info{ font-size:13px; color:var(--sub); }
+  .chat-header .name{ font-weight:700; font-size:15px; }
+  .messages{ flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .msg{ max-width:75%; padding:10px 14px; border-radius:16px; font-size:14px; line-height:1.4; word-break:break-word; }
+  .msg .sender{ font-size:11px; opacity:.7; margin-bottom:2px; font-weight:600; }
+  .msg.me{ align-self:flex-end; background:var(--bubble-me); color:#fff; border-bottom-right-radius:4px; }
+  .msg.other{ align-self:flex-start; background:var(--bubble-other); color:#333; border-bottom-left-radius:4px; }
+  .msg.system{ align-self:center; background:transparent; color:var(--sub); font-size:12px; text-align:center; max-width:100%; }
+  .composer{ display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); }
+  .composer input{ flex:1; }
+  .composer button{ width:auto; padding:12px 18px; }
+
+  /* Admin list */
+  .room-card{ border:1.5px solid var(--border); border-radius:12px; padding:14px; margin-bottom:10px; cursor:pointer; }
+  .room-card.closed{ opacity:.5; }
+  .room-card .top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .room-card .nickname{ font-weight:700; font-size:15px; }
+  .room-card .tag{ font-size:11px; padding:2px 8px; border-radius:20px; background:#eef; color:var(--accent); font-weight:600; }
+  .room-card .tag.closed{ background:#eee; color:#999; }
+  .room-card .meta{ font-size:12px; color:var(--sub); margin-bottom:4px; }
+  .room-card .intro{ font-size:13px; color:#555; }
+  .toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .empty{ text-align:center; color:var(--sub); font-size:13px; padding:40px 0; }
+
+  .passcode-box{ display:flex; flex-direction:column; gap:12px; justify-content:center; align-items:center; flex:1; text-align:center; padding:20px; }
+  .link-row{ text-align:center; padding:10px 0; }
+  .link-row a{ color:var(--sub); font-size:12px; text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1 id="headerTitle">매칭 라운지</h1>
+      <div class="sub" id="headerSub">편하게 대화 나눠요</div>
+    </div>
+    <div id="headerRight"></div>
+  </header>
+
+  <!-- LANDING -->
+  <div id="screen-landing" class="screen landing">
+    <h2>👋 안녕하세요</h2>
+    <p>간단한 소개를 남기고 바로 대화방에 입장하세요.<br>익명 닉네임으로 진행됩니다.</p>
+    <button class="btn" onclick="showScreen('form')">입장하기</button>
+    <div class="link-row"><a href="#" onclick="showAdminLogin();return false;">관리자이신가요?</a></div>
+  </div>
+
+  <!-- APPLICATION FORM -->
+  <div id="screen-form" class="screen hidden">
+    <div class="form-group">
+      <label>닉네임</label>
+      <input type="text" id="f-nickname" placeholder="채팅에서 사용할 이름" maxlength="12">
+    </div>
+    <div class="form-group">
+      <label>성별</label>
+      <div class="radio-row">
+        <label><input type="radio" name="gender" value="여성"><span>여성</span></label>
+        <label><input type="radio" name="gender" value="남성"><span>남성</span></label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>출생연도</label>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <input type="number" id="f-birthyear" placeholder="예: 97" min="0" max="99" oninput="updateAgePreview()" style="flex:1;">
+        <span style="font-weight:600;color:#555;white-space:nowrap;">년생</span>
+      </div>
+      <div id="agePreview" style="font-size:12px;color:var(--sub);margin-top:6px;"></div>
+    </div>
+    <div class="form-group">
+      <label>키</label>
+      <input type="number" id="f-height" placeholder="예: 170" min="120" max="220">
+    </div>
+    <div class="form-group">
+      <label>회사명</label>
+      <input type="text" id="f-company" placeholder="재직 중인 회사명" maxlength="30">
+    </div>
+    <div class="form-group">
+      <label>MBTI</label>
+      <input type="text" id="f-mbti" placeholder="예: ENFP" maxlength="4" style="text-transform:uppercase;">
+    </div>
+    <div class="form-group">
+      <label>한줄소개</label>
+      <textarea id="f-intro" placeholder="간단한 자기소개를 남겨주세요" maxlength="80"></textarea>
+    </div>
+    <div class="form-group">
+      <label>이상형</label>
+      <textarea id="f-ideal" placeholder="원하는 이상형을 남겨주세요" maxlength="80"></textarea>
+    </div>
+    <div class="form-foot">
+      <button class="btn" id="submitFormBtn" onclick="submitApplication()">대화방 입장</button>
+    </div>
+  </div>
+
+  <!-- GUEST/ADMIN CHAT -->
+  <div id="screen-chat" class="screen hidden" style="padding:0;">
+    <div class="chat-header">
+      <div>
+        <div class="name" id="chatPartnerName">-</div>
+        <div class="info" id="chatMeta">-</div>
+      </div>
+      <button class="btn danger" id="closeRoomBtn" style="width:auto;padding:8px 14px;font-size:12px;display:none;" onclick="closeCurrentRoom()">방 종료</button>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div id="closedNotice" class="hidden" style="text-align:center;color:var(--sub);font-size:13px;padding:10px;">이 대화방은 종료되었습니다.</div>
+    <div class="composer" id="composer">
+      <input type="text" id="msgInput" placeholder="메시지를 입력하세요" onkeydown="if(event.key==='Enter')sendMessage()">
+      <button class="btn" onclick="sendMessage()">전송</button>
+    </div>
+  </div>
+
+  <!-- ADMIN PASSCODE -->
+  <div id="screen-adminlogin" class="screen hidden passcode-box">
+    <h2>🔒 관리자 로그인</h2>
+    <input type="text" id="passcodeInput" placeholder="암호 입력" style="text-align:center;max-width:200px;">
+    <button class="btn" style="max-width:200px;" onclick="tryAdminLogin()">로그인</button>
+    <div id="passcodeError" style="color:var(--danger);font-size:13px;display:none;">암호가 틀렸어요</div>
+  </div>
+
+  <!-- ADMIN DASHBOARD -->
+  <div id="screen-admin" class="screen hidden">
+    <div class="toolbar">
+      <strong id="adminAsLabel">관리자</strong>
+      <a href="#" onclick="switchAdminName();return false;" style="font-size:12px;color:var(--sub);">이름 변경</a>
+    </div>
+    <div id="roomList"></div>
+  </div>
+
+</div>
+
+<script type="module">
+// ====== Firebase 초기화 ======
+// TODO: 여기에 규리님 Firebase 콘솔에서 복사한 설정값을 붙여넣으세요.
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+import {
+  getFirestore, collection, doc, addDoc, setDoc, updateDoc, onSnapshot,
+  query, orderBy, serverTimestamp, getDoc
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBPk8dpVl_n_gu0Dg7vRL3WG5nNR1KbUew",
+  authDomain: "match-making-hub.firebaseapp.com",
+  projectId: "match-making-hub",
+  storageBucket: "match-making-hub.firebasestorage.app",
+  messagingSenderId: "1043163748358",
+  appId: "1:1043163748358:web:e3bd02a4b10e3ff0e44b87"
+};
+
+const ADMIN_PASSCODE = "10041004";
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+let currentUid = null;
+let currentRoomId = null;
+let currentRole = null; // 'guest' | 'admin'
+let adminName = localStorage.getItem('adminName') || '';
+let unsubMessages = null;
+let unsubRooms = null;
+
+signInAnonymously(auth).then((cred) => {
+  currentUid = cred.user.uid;
+  boot();
+}).catch((err) => {
+  console.error(err);
+  document.getElementById('headerSub').textContent = '연결에 문제가 있어요. 새로고침 해보세요.';
+});
+
+function boot(){
+  const savedRoom = localStorage.getItem('myRoomId');
+  const isAdmin = localStorage.getItem('isAdmin') === '1';
+  if (isAdmin) {
+    adminName = adminName || prompt('이름을 입력하세요 (예: 규리 / 친구)') || '관리자';
+    localStorage.setItem('adminName', adminName);
+    enterAdminDashboard();
+  } else if (savedRoom) {
+    enterGuestRoom(savedRoom);
+  } else {
+    showScreen('landing');
+  }
+}
+
+window.showScreen = function(name){
+  document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
+  document.getElementById('screen-' + name).classList.remove('hidden');
+};
+
+window.showAdminLogin = function(){
+  showScreen('adminlogin');
+};
+
+window.tryAdminLogin = function(){
+  const val = document.getElementById('passcodeInput').value.trim();
+  if (val === ADMIN_PASSCODE) {
+    localStorage.setItem('isAdmin', '1');
+    adminName = prompt('이름을 입력하세요 (예: 규리 / 친구)') || '관리자';
+    localStorage.setItem('adminName', adminName);
+    enterAdminDashboard();
+  } else {
+    document.getElementById('passcodeError').style.display = 'block';
+  }
+};
+
+window.switchAdminName = function(){
+  const n = prompt('이름을 입력하세요', adminName);
+  if (n) { adminName = n; localStorage.setItem('adminName', n); document.getElementById('adminAsLabel').textContent = '👤 ' + n; }
+};
+
+// ====== 출생연도 -> 한국 나이 계산 ======
+function getFullBirthYear(input){
+  const v = parseInt(input, 10);
+  if (isNaN(v)) return null;
+  if (v > 999) return v; // 이미 4자리로 입력한 경우
+  return v >= 30 ? 1900 + v : 2000 + v;
+}
+function getKoreanAge(fullBirthYear){
+  const thisYear = new Date().getFullYear();
+  return thisYear - fullBirthYear + 1;
+}
+window.updateAgePreview = function(){
+  const raw = document.getElementById('f-birthyear').value.trim();
+  const preview = document.getElementById('agePreview');
+  const fullYear = getFullBirthYear(raw);
+  if (!fullYear) { preview.textContent = ''; return; }
+  const age = getKoreanAge(fullYear);
+  preview.textContent = `${fullYear}년생 · 한국 나이 ${age}세`;
+};
+
+// ====== 신청서 제출 -> 새 방 생성 ======
+window.submitApplication = async function(){
+  const nickname = document.getElementById('f-nickname').value.trim();
+  const genderEl = document.querySelector('input[name=gender]:checked');
+  const birthYearRaw = document.getElementById('f-birthyear').value.trim();
+  const height = document.getElementById('f-height').value.trim();
+  const company = document.getElementById('f-company').value.trim();
+  const mbti = document.getElementById('f-mbti').value.trim().toUpperCase();
+  const intro = document.getElementById('f-intro').value.trim();
+  const ideal = document.getElementById('f-ideal').value.trim();
+
+  const fullBirthYear = getFullBirthYear(birthYearRaw);
+
+  if (!nickname || !genderEl || !fullBirthYear) {
+    alert('닉네임, 성별, 출생연도는 꼭 입력해주세요.');
+    return;
+  }
+
+  const age = getKoreanAge(fullBirthYear);
+
+  const btn = document.getElementById('submitFormBtn');
+  btn.disabled = true; btn.textContent = '입장 중...';
+
+  try {
+    const roomRef = await addDoc(collection(db, 'rooms'), {
+      nickname, gender: genderEl.value,
+      birthYear: fullBirthYear, age,
+      height, company, mbti, intro, ideal,
+      guestUid: currentUid,
+      status: 'open',
+      createdAt: serverTimestamp()
+    });
+    localStorage.setItem('myRoomId', roomRef.id);
+    enterGuestRoom(roomRef.id);
+  } catch (e) {
+    console.error(e);
+    alert('입장에 실패했어요. 다시 시도해주세요.');
+    btn.disabled = false; btn.textContent = '대화방 입장';
+  }
+};
+
+// ====== 게스트: 채팅방 입장 ======
+async function enterGuestRoom(roomId){
+  currentRoomId = roomId;
+  currentRole = 'guest';
+  showScreen('chat');
+  document.getElementById('closeRoomBtn').style.display = 'none';
+
+  const roomSnap = await getDoc(doc(db, 'rooms', roomId));
+  const room = roomSnap.data();
+  if (!room) { showScreen('landing'); return; }
+
+  document.getElementById('chatPartnerName').textContent = '매니저와의 대화';
+  document.getElementById('chatMeta').textContent = room.status === 'closed' ? '종료됨' : '진행 중';
+
+  watchRoomStatus(roomId, room);
+  watchMessages(roomId, 'guest');
+}
+
+function watchRoomStatus(roomId, initialRoom){
+  onSnapshot(doc(db, 'rooms', roomId), (snap) => {
+    const room = snap.data();
+    if (!room) return;
+    const closed = room.status === 'closed';
+    document.getElementById('chatMeta').textContent = closed ? '종료됨' : '진행 중';
+    document.getElementById('closedNotice').classList.toggle('hidden', !closed);
+    document.getElementById('composer').classList.toggle('hidden', closed);
+  });
+}
+
+// ====== 메시지 송수신 ======
+function watchMessages(roomId, viewRole){
+  if (unsubMessages) unsubMessages();
+  const q = query(collection(db, 'rooms', roomId, 'messages'), orderBy('createdAt', 'asc'));
+  unsubMessages = onSnapshot(q, (snap) => {
+    const box = document.getElementById('messages');
+    box.innerHTML = '';
+    snap.forEach(d => {
+      const m = d.data();
+      const bubble = document.createElement('div');
+      const mine = (viewRole === 'guest' && m.sender === 'guest') || (viewRole === 'admin' && m.sender === 'admin');
+      bubble.className = 'msg ' + (mine ? 'me' : 'other');
+      bubble.innerHTML = '<div class="sender">' + escapeHtml(m.name || (m.sender==='admin'?'매니저':'게스트')) + '</div>' + escapeHtml(m.text || '');
+      box.appendChild(bubble);
+    });
+    box.scrollTop = box.scrollHeight;
+  });
+}
+
+window.sendMessage = async function(){
+  const input = document.getElementById('msgInput');
+  const text = input.value.trim();
+  if (!text || !currentRoomId) return;
+  input.value = '';
+  const senderName = currentRole === 'admin' ? adminName : '나';
+  await addDoc(collection(db, 'rooms', currentRoomId, 'messages'), {
+    sender: currentRole,
+    name: senderName,
+    text,
+    createdAt: serverTimestamp()
+  });
+};
+
+// ====== 관리자 대시보드 ======
+function enterAdminDashboard(){
+  currentRole = 'admin';
+  document.getElementById('adminAsLabel').textContent = '👤 ' + adminName;
+  showScreen('admin');
+  if (unsubRooms) unsubRooms();
+  const q = query(collection(db, 'rooms'), orderBy('createdAt', 'desc'));
+  unsubRooms = onSnapshot(q, (snap) => {
+    const list = document.getElementById('roomList');
+    list.innerHTML = '';
+    if (snap.empty) {
+      list.innerHTML = '<div class="empty">아직 들어온 신청이 없어요</div>';
+      return;
+    }
+    snap.forEach(d => {
+      const r = d.data();
+      const card = document.createElement('div');
+      card.className = 'room-card' + (r.status === 'closed' ? ' closed' : '');
+      card.onclick = () => enterAdminRoom(d.id, r);
+      card.innerHTML = `
+        <div class="top">
+          <span class="nickname">${escapeHtml(r.nickname || '익명')}</span>
+          <span class="tag ${r.status === 'closed' ? 'closed' : ''}">${r.status === 'closed' ? '종료' : '진행중'}</span>
+        </div>
+        <div class="meta">${escapeHtml(r.gender||'')} · ${escapeHtml(String(r.age||''))}세(${escapeHtml(String(r.birthYear||'-'))}) · ${escapeHtml(r.height?r.height+'cm':'-')} · ${escapeHtml(r.mbti||'-')}</div>
+        <div class="meta">${escapeHtml(r.company||'-')}</div>
+        <div class="intro">${escapeHtml(r.intro||'')}</div>
+        ${r.ideal ? `<div class="intro">💛 이상형: ${escapeHtml(r.ideal)}</div>` : ''}
+      `;
+      list.appendChild(card);
+    });
+  });
+}
+
+function enterAdminRoom(roomId, room){
+  currentRoomId = roomId;
+  currentRole = 'admin';
+  showScreen('chat');
+  document.getElementById('closeRoomBtn').style.display = room.status === 'closed' ? 'none' : 'block';
+  document.getElementById('chatPartnerName').textContent = room.nickname + ' 님';
+  document.getElementById('chatMeta').textContent = `${room.gender||''} · ${room.age||''}세(${room.birthYear||'-'}) · ${room.height?room.height+'cm':'-'} · ${room.mbti||'-'} · ${room.company||'-'}`;
+  document.getElementById('closedNotice').classList.toggle('hidden', room.status !== 'closed');
+  document.getElementById('composer').classList.toggle('hidden', room.status === 'closed');
+  watchMessages(roomId, 'admin');
+
+  // back button behavior: reuse header title click
+  document.getElementById('headerTitle').onclick = () => { showScreen('admin'); document.getElementById('headerTitle').onclick=null; };
+}
+
+window.closeCurrentRoom = async function(){
+  if (!currentRoomId) return;
+  if (!confirm('이 방을 종료할까요?')) return;
+  await updateDoc(doc(db, 'rooms', currentRoomId), { status: 'closed', closedAt: serverTimestamp() });
+  document.getElementById('closeRoomBtn').style.display = 'none';
+};
+
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>

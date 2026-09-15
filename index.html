@@ -331,7 +331,10 @@ let currentRole = null; // 'guest' | 'admin'
 let adminName = localStorage.getItem('adminName') || '';
 let unsubMessages = null;
 let unsubRooms = null;
+let unsubRoomDoc = null;
 let currentRoomData = null;
+let lastMessagesSnap = null;
+let otherPartyReadAt = 0;
 
 signInAnonymously(auth).then((cred) => {
   currentUid = cred.user.uid;
@@ -492,6 +495,8 @@ window.tryRelogin = async function(){
 async function enterGuestRoom(roomId){
   currentRoomId = roomId;
   currentRole = 'guest';
+  lastMessagesSnap = null;
+  otherPartyReadAt = 0;
   showScreen('chat');
   document.getElementById('closeRoomBtn').style.display = 'none';
   document.getElementById('backToListBtn').style.display = 'none';
@@ -511,14 +516,36 @@ async function enterGuestRoom(roomId){
 }
 
 function watchRoomStatus(roomId, initialRoom){
-  onSnapshot(doc(db, 'rooms', roomId), (snap) => {
+  if (unsubRoomDoc) unsubRoomDoc();
+  unsubRoomDoc = onSnapshot(doc(db, 'rooms', roomId), (snap) => {
     const room = snap.data();
     if (!room) return;
     const closed = room.status === 'closed';
     document.getElementById('chatMeta').textContent = closed ? '종료됨' : '진행 중';
     document.getElementById('closedNotice').classList.toggle('hidden', !closed);
     document.getElementById('composer').classList.toggle('hidden', closed);
+    otherPartyReadAt = room.adminReadAt && room.adminReadAt.toMillis ? room.adminReadAt.toMillis() : 0;
+    renderMessageList('guest');
   });
+}
+
+function watchAdminRoomDoc(roomId){
+  if (unsubRoomDoc) unsubRoomDoc();
+  unsubRoomDoc = onSnapshot(doc(db, 'rooms', roomId), (snap) => {
+    const room = snap.data();
+    if (!room) return;
+    otherPartyReadAt = room.guestReadAt && room.guestReadAt.toMillis ? room.guestReadAt.toMillis() : 0;
+    renderMessageList('admin');
+  });
+}
+
+async function markRoomRead(roomId, viewRole){
+  const field = viewRole === 'admin' ? 'adminReadAt' : 'guestReadAt';
+  try {
+    await updateDoc(doc(db, 'rooms', roomId), { [field]: serverTimestamp() });
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 // ====== 알림 (브라우저 탭이 열려있을 때만 동작, 별도 결제 불필요) ======
@@ -600,32 +627,45 @@ function watchMessages(roomId, viewRole){
     }
     firstLoad = false;
 
-    // 관리자가 지금 이 방을 보고 있으면 '읽음'으로 표시
+    // 관리자가 지금 이 방을 보고 있으면 '읽음'으로 표시 (대시보드 빨간점용)
     if (viewRole === 'admin') {
       localStorage.setItem('lastRead_' + roomId, Date.now().toString());
     }
 
-    const box = document.getElementById('messages');
-    box.innerHTML = '';
-    snap.forEach(d => {
-      const m = d.data();
-      const bubble = document.createElement('div');
-      const mine = (viewRole === 'guest' && m.sender === 'guest') || (viewRole === 'admin' && m.sender === 'admin');
-      bubble.className = 'msg ' + (mine ? 'me' : 'other');
-      const senderLabel = '<div class="sender">' + escapeHtml(m.name || (m.sender==='admin'?'매니저':'게스트')) + '</div>';
-      const timeLabel = '<div class="msg-time">' + formatMsgTime(m.createdAt) + '</div>';
-      if (m.type === 'image' && m.imageData) {
-        bubble.innerHTML = senderLabel + '<img style="cursor:pointer;">' + timeLabel;
-        const imgEl = bubble.querySelector('img');
-        imgEl.src = m.imageData;
-        imgEl.addEventListener('click', () => openImageViewer(m.imageData, viewRole === 'admin'));
-      } else {
-        bubble.innerHTML = senderLabel + linkify(escapeHtml(m.text || '')) + timeLabel;
-      }
-      box.appendChild(bubble);
-    });
-    box.scrollTop = box.scrollHeight;
+    lastMessagesSnap = snap;
+    markRoomRead(roomId, viewRole);
+    renderMessageList(viewRole);
   });
+}
+
+function renderMessageList(viewRole){
+  if (!lastMessagesSnap) return;
+  const box = document.getElementById('messages');
+  box.innerHTML = '';
+  lastMessagesSnap.forEach(d => {
+    const m = d.data();
+    const bubble = document.createElement('div');
+    const mine = (viewRole === 'guest' && m.sender === 'guest') || (viewRole === 'admin' && m.sender === 'admin');
+    bubble.className = 'msg ' + (mine ? 'me' : 'other');
+    const senderLabel = '<div class="sender">' + escapeHtml(m.name || (m.sender==='admin'?'매니저':'게스트')) + '</div>';
+
+    const timeText = formatMsgTime(m.createdAt);
+    const msgMillis = m.createdAt && m.createdAt.toMillis ? m.createdAt.toMillis() : 0;
+    const isRead = mine && msgMillis && otherPartyReadAt && otherPartyReadAt >= msgMillis;
+    const metaText = (isRead ? '읽음' : '') + (isRead && timeText ? ' · ' : '') + timeText;
+    const timeLabel = '<div class="msg-time">' + metaText + '</div>';
+
+    if (m.type === 'image' && m.imageData) {
+      bubble.innerHTML = senderLabel + '<img style="cursor:pointer;">' + timeLabel;
+      const imgEl = bubble.querySelector('img');
+      imgEl.src = m.imageData;
+      imgEl.addEventListener('click', () => openImageViewer(m.imageData, viewRole === 'admin'));
+    } else {
+      bubble.innerHTML = senderLabel + linkify(escapeHtml(m.text || '')) + timeLabel;
+    }
+    box.appendChild(bubble);
+  });
+  box.scrollTop = box.scrollHeight;
 }
 
 // ====== 이미지 첨부 ======
@@ -855,6 +895,8 @@ function enterAdminRoom(roomId, room){
   currentRoomId = roomId;
   currentRole = 'admin';
   currentRoomData = room;
+  lastMessagesSnap = null;
+  otherPartyReadAt = 0;
   showScreen('chat');
   document.getElementById('closeRoomBtn').style.display = room.status === 'closed' ? 'none' : 'block';
   document.getElementById('chatPartnerName').textContent = room.nickname + ' 님';
@@ -867,6 +909,7 @@ function enterAdminRoom(roomId, room){
   statusSelect.value = room.matchStatus || 'before';
   document.getElementById('editInfoBtn').classList.remove('hidden');
   document.getElementById('copyInfoBtn').classList.remove('hidden');
+  watchAdminRoomDoc(roomId);
   watchMessages(roomId, 'admin');
 }
 
@@ -973,6 +1016,7 @@ window.saveAdminEdit = async function(){
 
 window.backToAdminList = function(){
   if (unsubMessages) { unsubMessages(); unsubMessages = null; }
+  if (unsubRoomDoc) { unsubRoomDoc(); unsubRoomDoc = null; }
   currentRoomId = null;
   showScreen('admin');
 };

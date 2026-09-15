@@ -72,6 +72,11 @@
   .room-card .intro{ font-size:13px; color:#555; }
   .toolbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
   .empty{ text-align:center; color:var(--sub); font-size:13px; padding:40px 0; }
+  .gender-tabs{ display:flex; gap:8px; margin-bottom:14px; }
+  .tab-btn{ flex:1; padding:10px; border:1.5px solid var(--border); background:#fff; border-radius:10px; font-weight:700; font-size:13px; cursor:pointer; color:#555; }
+  .tab-btn.active{ border-color:var(--accent); color:var(--accent); background:#f4f2ff; }
+  .match-status-row{ margin-top:8px; }
+  .match-status-select{ padding:6px 10px; font-size:12px; border-radius:8px; border:1.5px solid var(--border); background:#fcfcfc; font-weight:600; color:#555; }
 
   .passcode-box{ display:flex; flex-direction:column; gap:12px; justify-content:center; align-items:center; flex:1; text-align:center; padding:20px; }
   .link-row{ text-align:center; padding:10px 0; }
@@ -86,7 +91,9 @@
       <h1 id="headerTitle">매칭 라운지</h1>
       <div class="sub" id="headerSub">편하게 대화 나눠요</div>
     </div>
-    <div id="headerRight"></div>
+    <div id="headerRight">
+      <button class="notifyBtn" onclick="enableNotifications()" style="background:none;border:1.5px solid var(--border);border-radius:20px;padding:6px 12px;font-size:12px;cursor:pointer;color:var(--text);white-space:nowrap;">🔕 알림 켜기</button>
+    </div>
   </header>
 
   <!-- LANDING -->
@@ -94,7 +101,21 @@
     <h2>👋 안녕하세요</h2>
     <p>간단한 소개를 남기고 바로 대화방에 입장하세요.<br>익명 닉네임으로 진행됩니다.</p>
     <button class="btn" onclick="showScreen('form')">입장하기</button>
+    <div class="link-row"><a href="#" onclick="showScreen('relogin');return false;">이미 신청하셨나요? 다시 입장하기</a></div>
     <div class="link-row"><a href="#" onclick="showAdminLogin();return false;">관리자이신가요?</a></div>
+  </div>
+
+  <!-- RELOGIN -->
+  <div id="screen-relogin" class="screen hidden passcode-box">
+    <h2>🔑 다시 입장하기</h2>
+    <p style="color:var(--sub);font-size:13px;margin:0 0 4px;">신청할 때 입력한 닉네임과 출생연도를 입력해주세요.</p>
+    <input type="text" id="relogin-nickname" placeholder="닉네임" style="text-align:center;max-width:240px;">
+    <div style="display:flex;align-items:center;gap:8px;max-width:240px;width:100%;">
+      <input type="number" id="relogin-birthyear" placeholder="예: 97" min="0" max="99" style="flex:1;text-align:center;">
+      <span style="font-weight:600;color:#555;white-space:nowrap;">년생</span>
+    </div>
+    <button class="btn" id="reloginBtn" style="max-width:240px;" onclick="tryRelogin()">확인</button>
+    <div class="link-row"><a href="#" onclick="showScreen('landing');return false;">돌아가기</a></div>
   </div>
 
   <!-- APPLICATION FORM -->
@@ -127,6 +148,10 @@
       <input type="text" id="f-company" placeholder="재직 중인 회사명" maxlength="30">
     </div>
     <div class="form-group">
+      <label>사는곳</label>
+      <input type="text" id="f-location" placeholder="예: 서울 강남구" maxlength="30">
+    </div>
+    <div class="form-group">
       <label>MBTI</label>
       <input type="text" id="f-mbti" placeholder="예: ENFP" maxlength="4" style="text-transform:uppercase;">
     </div>
@@ -153,7 +178,14 @@
           <div class="info" id="chatMeta">-</div>
         </div>
       </div>
-      <button class="btn danger" id="closeRoomBtn" style="width:auto;padding:8px 14px;font-size:12px;display:none;" onclick="closeCurrentRoom()">방 종료</button>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+        <select id="matchStatusSelect" class="match-status-select hidden" onchange="updateMatchStatus(currentRoomId, this.value)">
+          <option value="before">매칭전</option>
+          <option value="waiting">응답대기중</option>
+          <option value="matched">매칭완료</option>
+        </select>
+        <button class="btn danger" id="closeRoomBtn" style="width:auto;padding:8px 14px;font-size:12px;display:none;" onclick="closeCurrentRoom()">방 종료</button>
+      </div>
     </div>
     <div class="messages" id="messages"></div>
     <div id="closedNotice" class="hidden" style="text-align:center;color:var(--sub);font-size:13px;padding:10px;">이 대화방은 종료되었습니다.</div>
@@ -179,6 +211,11 @@
       <strong id="adminAsLabel">관리자</strong>
       <a href="#" onclick="switchAdminName();return false;" style="font-size:12px;color:var(--sub);">이름 변경</a>
     </div>
+    <div class="gender-tabs">
+      <button class="tab-btn active" data-gender="all" onclick="setGenderTab('all')">전체</button>
+      <button class="tab-btn" data-gender="여성" onclick="setGenderTab('여성')">여자</button>
+      <button class="tab-btn" data-gender="남성" onclick="setGenderTab('남성')">남자</button>
+    </div>
     <div id="roomList"></div>
   </div>
 
@@ -190,7 +227,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
   getFirestore, collection, doc, addDoc, setDoc, updateDoc, onSnapshot,
-  query, orderBy, serverTimestamp, getDoc
+  query, where, orderBy, serverTimestamp, getDoc, getDocs
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 
@@ -225,6 +262,7 @@ signInAnonymously(auth).then((cred) => {
 });
 
 function boot(){
+  updateNotifyBtnStates();
   const savedRoom = localStorage.getItem('myRoomId');
   const isAdmin = localStorage.getItem('isAdmin') === '1';
   if (isAdmin) {
@@ -291,6 +329,7 @@ window.submitApplication = async function(){
   const birthYearRaw = document.getElementById('f-birthyear').value.trim();
   const height = document.getElementById('f-height').value.trim();
   const company = document.getElementById('f-company').value.trim();
+  const location = document.getElementById('f-location').value.trim();
   const mbti = document.getElementById('f-mbti').value.trim().toUpperCase();
   const intro = document.getElementById('f-intro').value.trim();
   const ideal = document.getElementById('f-ideal').value.trim();
@@ -311,9 +350,10 @@ window.submitApplication = async function(){
     const roomRef = await addDoc(collection(db, 'rooms'), {
       nickname, gender: genderEl.value,
       birthYear: fullBirthYear, age,
-      height, company, mbti, intro, ideal,
+      height, company, location, mbti, intro, ideal,
       guestUid: currentUid,
       status: 'open',
+      matchStatus: 'before',
       createdAt: serverTimestamp()
     });
     localStorage.setItem('myRoomId', roomRef.id);
@@ -325,6 +365,48 @@ window.submitApplication = async function(){
   }
 };
 
+// ====== 다시 입장하기 (다른 브라우저/기기에서 닉네임+출생연도로 재입장) ======
+window.tryRelogin = async function(){
+  const nickname = document.getElementById('relogin-nickname').value.trim();
+  const birthYearRaw = document.getElementById('relogin-birthyear').value.trim();
+  const fullBirthYear = getFullBirthYear(birthYearRaw);
+
+  if (!nickname || !fullBirthYear) {
+    alert('닉네임과 출생연도를 모두 입력해주세요.');
+    return;
+  }
+
+  const btn = document.getElementById('reloginBtn');
+  btn.disabled = true; btn.textContent = '확인 중...';
+
+  try {
+    const q = query(
+      collection(db, 'rooms'),
+      where('nickname', '==', nickname),
+      where('birthYear', '==', fullBirthYear)
+    );
+    const snap = await getDocs(q);
+    if (snap.empty) {
+      alert('일치하는 신청 내역을 찾을 수 없어요. 닉네임과 출생연도를 다시 확인해주세요.');
+      btn.disabled = false; btn.textContent = '확인';
+      return;
+    }
+    // 여러 개 매칭되면 가장 최근에 신청한 방으로 입장
+    let best = snap.docs[0];
+    snap.docs.forEach(d => {
+      const a = d.data().createdAt && d.data().createdAt.toMillis ? d.data().createdAt.toMillis() : 0;
+      const b = best.data().createdAt && best.data().createdAt.toMillis ? best.data().createdAt.toMillis() : 0;
+      if (a > b) best = d;
+    });
+    localStorage.setItem('myRoomId', best.id);
+    enterGuestRoom(best.id);
+  } catch (e) {
+    console.error(e);
+    alert('확인 중 문제가 생겼어요. 다시 시도해주세요.');
+    btn.disabled = false; btn.textContent = '확인';
+  }
+};
+
 // ====== 게스트: 채팅방 입장 ======
 async function enterGuestRoom(roomId){
   currentRoomId = roomId;
@@ -332,6 +414,7 @@ async function enterGuestRoom(roomId){
   showScreen('chat');
   document.getElementById('closeRoomBtn').style.display = 'none';
   document.getElementById('backToListBtn').style.display = 'none';
+  document.getElementById('matchStatusSelect').classList.add('hidden');
 
   const roomSnap = await getDoc(doc(db, 'rooms', roomId));
   const room = roomSnap.data();
@@ -355,11 +438,85 @@ function watchRoomStatus(roomId, initialRoom){
   });
 }
 
+// ====== 알림 (브라우저 탭이 열려있을 때만 동작, 별도 결제 불필요) ======
+let notifyEnabled = (localStorage.getItem('notifyEnabled') === '1');
+
+function updateNotifyBtnStates(){
+  document.querySelectorAll('.notifyBtn').forEach(btn => {
+    btn.textContent = notifyEnabled ? '🔔 알림 켜짐' : '🔕 알림 켜기';
+  });
+}
+
+window.enableNotifications = async function(){
+  if (!('Notification' in window)) { alert('이 브라우저는 알림 기능을 지원하지 않아요.'); return; }
+  if (Notification.permission === 'granted') {
+    notifyEnabled = !notifyEnabled;
+  } else {
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      notifyEnabled = true;
+    } else {
+      alert('알림 권한이 거부되었어요. 브라우저 사이트 설정에서 알림을 허용해주세요.');
+      notifyEnabled = false;
+    }
+  }
+  localStorage.setItem('notifyEnabled', notifyEnabled ? '1' : '0');
+  updateNotifyBtnStates();
+  if (notifyEnabled) playBeep();
+};
+
+function playBeep(){
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880;
+    g.gain.value = 0.15;
+    o.start();
+    setTimeout(() => { o.stop(); ctx.close(); }, 180);
+  } catch(e) {}
+}
+
+function notifyNewMessage(m){
+  if (!notifyEnabled) return;
+  playBeep();
+  if (Notification.permission === 'granted') {
+    try {
+      new Notification('새 메시지 💬', {
+        body: (m.name || '상대방') + ': ' + (m.type === 'image' ? '사진을 보냈어요' : (m.text || ''))
+      });
+    } catch(e) {}
+  }
+}
+
+function notifyNewRoom(r){
+  if (!notifyEnabled) return;
+  playBeep();
+  if (Notification.permission === 'granted') {
+    try {
+      new Notification('새 신청자 도착 🙋', { body: (r.nickname||'익명') + ' 님이 신청했어요' });
+    } catch(e) {}
+  }
+}
+
 // ====== 메시지 송수신 ======
 function watchMessages(roomId, viewRole){
   if (unsubMessages) unsubMessages();
+  let firstLoad = true;
   const q = query(collection(db, 'rooms', roomId, 'messages'), orderBy('createdAt', 'asc'));
   unsubMessages = onSnapshot(q, (snap) => {
+    if (!firstLoad) {
+      snap.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const m = change.doc.data();
+          const mine = (viewRole === 'guest' && m.sender === 'guest') || (viewRole === 'admin' && m.sender === 'admin');
+          if (!mine) notifyNewMessage(m);
+        }
+      });
+    }
+    firstLoad = false;
+
     const box = document.getElementById('messages');
     box.innerHTML = '';
     snap.forEach(d => {
@@ -444,36 +601,79 @@ window.sendMessage = async function(){
 };
 
 // ====== 관리자 대시보드 ======
+let lastRoomDocs = [];
+let currentGenderTab = 'all';
+
+window.setGenderTab = function(g){
+  currentGenderTab = g;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.gender === g));
+  renderRoomList();
+};
+
+window.updateMatchStatus = async function(roomId, value){
+  if (!roomId) return;
+  try {
+    await updateDoc(doc(db, 'rooms', roomId), { matchStatus: value });
+  } catch (e) {
+    console.error(e);
+    alert('상태 변경에 실패했어요.');
+  }
+};
+
+const MATCH_STATUS_LABEL = { before: '매칭전', waiting: '응답대기중', matched: '매칭완료' };
+
+function renderRoomList(){
+  const list = document.getElementById('roomList');
+  list.innerHTML = '';
+  const filtered = lastRoomDocs.filter(d => currentGenderTab === 'all' || d.data().gender === currentGenderTab);
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty">신청 내역이 없어요</div>';
+    return;
+  }
+  filtered.forEach(d => {
+    const r = d.data();
+    const matchStatus = r.matchStatus || 'before';
+    const card = document.createElement('div');
+    card.className = 'room-card' + (r.status === 'closed' ? ' closed' : '');
+    card.onclick = () => enterAdminRoom(d.id, r);
+    card.innerHTML = `
+      <div class="top">
+        <span class="nickname">${escapeHtml(r.nickname || '익명')}</span>
+        <span class="tag ${r.status === 'closed' ? 'closed' : ''}">${r.status === 'closed' ? '종료' : '진행중'}</span>
+      </div>
+      <div class="meta">${escapeHtml(r.gender||'')} · ${escapeHtml(String(r.age||''))}세(${escapeHtml(String(r.birthYear||'-'))}) · ${escapeHtml(r.height?r.height+'cm':'-')} · ${escapeHtml(r.mbti||'-')}</div>
+      <div class="meta">${escapeHtml(r.company||'-')} · ${escapeHtml(r.location||'-')}</div>
+      <div class="intro">${escapeHtml(r.intro||'')}</div>
+      ${r.ideal ? `<div class="intro">💛 이상형: ${escapeHtml(r.ideal)}</div>` : ''}
+      <div class="match-status-row">
+        <select class="match-status-select" onchange="updateMatchStatus('${d.id}', this.value)">
+          <option value="before" ${matchStatus==='before'?'selected':''}>매칭전</option>
+          <option value="waiting" ${matchStatus==='waiting'?'selected':''}>응답대기중</option>
+          <option value="matched" ${matchStatus==='matched'?'selected':''}>매칭완료</option>
+        </select>
+      </div>
+    `;
+    card.querySelector('.match-status-select').addEventListener('click', (e) => e.stopPropagation());
+    list.appendChild(card);
+  });
+}
+
 function enterAdminDashboard(){
   currentRole = 'admin';
   document.getElementById('adminAsLabel').textContent = '👤 ' + adminName;
   showScreen('admin');
   if (unsubRooms) unsubRooms();
+  let firstRoomsLoad = true;
   const q = query(collection(db, 'rooms'), orderBy('createdAt', 'desc'));
   unsubRooms = onSnapshot(q, (snap) => {
-    const list = document.getElementById('roomList');
-    list.innerHTML = '';
-    if (snap.empty) {
-      list.innerHTML = '<div class="empty">아직 들어온 신청이 없어요</div>';
-      return;
+    if (!firstRoomsLoad) {
+      snap.docChanges().forEach(change => {
+        if (change.type === 'added') notifyNewRoom(change.doc.data());
+      });
     }
-    snap.forEach(d => {
-      const r = d.data();
-      const card = document.createElement('div');
-      card.className = 'room-card' + (r.status === 'closed' ? ' closed' : '');
-      card.onclick = () => enterAdminRoom(d.id, r);
-      card.innerHTML = `
-        <div class="top">
-          <span class="nickname">${escapeHtml(r.nickname || '익명')}</span>
-          <span class="tag ${r.status === 'closed' ? 'closed' : ''}">${r.status === 'closed' ? '종료' : '진행중'}</span>
-        </div>
-        <div class="meta">${escapeHtml(r.gender||'')} · ${escapeHtml(String(r.age||''))}세(${escapeHtml(String(r.birthYear||'-'))}) · ${escapeHtml(r.height?r.height+'cm':'-')} · ${escapeHtml(r.mbti||'-')}</div>
-        <div class="meta">${escapeHtml(r.company||'-')}</div>
-        <div class="intro">${escapeHtml(r.intro||'')}</div>
-        ${r.ideal ? `<div class="intro">💛 이상형: ${escapeHtml(r.ideal)}</div>` : ''}
-      `;
-      list.appendChild(card);
-    });
+    firstRoomsLoad = false;
+    lastRoomDocs = snap.docs;
+    renderRoomList();
   });
 }
 
@@ -483,10 +683,13 @@ function enterAdminRoom(roomId, room){
   showScreen('chat');
   document.getElementById('closeRoomBtn').style.display = room.status === 'closed' ? 'none' : 'block';
   document.getElementById('chatPartnerName').textContent = room.nickname + ' 님';
-  document.getElementById('chatMeta').textContent = `${room.gender||''} · ${room.age||''}세(${room.birthYear||'-'}) · ${room.height?room.height+'cm':'-'} · ${room.mbti||'-'} · ${room.company||'-'}`;
+  document.getElementById('chatMeta').textContent = `${room.gender||''} · ${room.age||''}세(${room.birthYear||'-'}) · ${room.height?room.height+'cm':'-'} · ${room.mbti||'-'} · ${room.company||'-'} · ${room.location||'-'}`;
   document.getElementById('closedNotice').classList.toggle('hidden', room.status !== 'closed');
   document.getElementById('composer').classList.toggle('hidden', room.status === 'closed');
   document.getElementById('backToListBtn').style.display = 'block';
+  const statusSelect = document.getElementById('matchStatusSelect');
+  statusSelect.classList.remove('hidden');
+  statusSelect.value = room.matchStatus || 'before';
   watchMessages(roomId, 'admin');
 }
 

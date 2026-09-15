@@ -57,6 +57,7 @@
   .msg.system{ align-self:center; background:transparent; color:var(--sub); font-size:12px; text-align:center; max-width:100%; }
   .msg img{ max-width:100%; border-radius:12px; display:block; margin-top:2px; cursor:pointer; }
   .msg.uploading{ opacity:.5; }
+  .msg-time{ font-size:10px; opacity:.6; margin-top:4px; text-align:right; }
   .composer{ display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); }
   .composer input{ flex:1; }
   .composer button{ width:auto; padding:12px 18px; }
@@ -287,6 +288,16 @@
     <div id="roomList"></div>
   </div>
 
+</div>
+
+<!-- 이미지 뷰어 (원본 화질로 확대 보기 / 복사 / 저장) -->
+<div id="imageViewer" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:1000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;">
+  <button onclick="closeImageViewer()" style="position:absolute;top:calc(16px + env(safe-area-inset-top, 0px));right:16px;background:none;border:none;color:#fff;font-size:28px;cursor:pointer;line-height:1;">✕</button>
+  <img id="viewerImg" src="" style="max-width:92vw;max-height:72vh;border-radius:8px;object-fit:contain;">
+  <div style="display:flex;gap:12px;margin-top:18px;">
+    <button onclick="copyViewerImage()" style="padding:10px 18px;border-radius:20px;border:none;background:#fff;color:#222;font-weight:700;font-size:13px;cursor:pointer;">📋 복사</button>
+    <button id="viewerSaveBtn" class="hidden" onclick="saveViewerImage()" style="padding:10px 18px;border-radius:20px;border:none;background:#6c5ce7;color:#fff;font-weight:700;font-size:13px;cursor:pointer;">💾 저장</button>
+  </div>
 </div>
 
 <script type="module">
@@ -602,10 +613,14 @@ function watchMessages(roomId, viewRole){
       const mine = (viewRole === 'guest' && m.sender === 'guest') || (viewRole === 'admin' && m.sender === 'admin');
       bubble.className = 'msg ' + (mine ? 'me' : 'other');
       const senderLabel = '<div class="sender">' + escapeHtml(m.name || (m.sender==='admin'?'매니저':'게스트')) + '</div>';
+      const timeLabel = '<div class="msg-time">' + formatMsgTime(m.createdAt) + '</div>';
       if (m.type === 'image' && m.imageData) {
-        bubble.innerHTML = senderLabel + '<img src="' + m.imageData + '" onclick="window.open(this.src)">';
+        bubble.innerHTML = senderLabel + '<img style="cursor:pointer;">' + timeLabel;
+        const imgEl = bubble.querySelector('img');
+        imgEl.src = m.imageData;
+        imgEl.addEventListener('click', () => openImageViewer(m.imageData, viewRole === 'admin'));
       } else {
-        bubble.innerHTML = senderLabel + linkify(escapeHtml(m.text || ''));
+        bubble.innerHTML = senderLabel + linkify(escapeHtml(m.text || '')) + timeLabel;
       }
       box.appendChild(bubble);
     });
@@ -989,6 +1004,61 @@ function linkify(escapedText){
     return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;word-break:break-all;">${cleanUrl}</a>${trail}`;
   });
 }
+
+// 메시지 보낸 시각 표시
+function formatMsgTime(ts){
+  if (!ts || !ts.toDate) return '';
+  const d = ts.toDate();
+  const mm = d.getMonth() + 1;
+  const dd = d.getDate();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${mm}/${dd} ${hh}:${mi}`;
+}
+
+// ====== 이미지 뷰어 (원본 화질 그대로 보기 / 복사 / 관리자 저장) ======
+let viewerImageData = null;
+
+window.openImageViewer = function(dataUrl, isAdmin){
+  viewerImageData = dataUrl;
+  document.getElementById('viewerImg').src = dataUrl;
+  document.getElementById('viewerSaveBtn').classList.toggle('hidden', !isAdmin);
+  document.getElementById('imageViewer').classList.remove('hidden');
+};
+
+window.closeImageViewer = function(){
+  document.getElementById('imageViewer').classList.add('hidden');
+  viewerImageData = null;
+};
+
+window.copyViewerImage = async function(){
+  if (!viewerImageData) return;
+  try {
+    const img = new Image();
+    img.src = viewerImageData;
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext('2d').drawImage(img, 0, 0);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+    alert('이미지를 복사했어요! 원하는 곳에 붙여넣기 해보세요.');
+  } catch (e) {
+    console.error(e);
+    alert('이 브라우저에서는 이미지 복사가 지원되지 않아요. "저장" 버튼을 이용해주세요.');
+  }
+};
+
+window.saveViewerImage = function(){
+  if (!viewerImageData) return;
+  const a = document.createElement('a');
+  a.href = viewerImageData;
+  a.download = 'photo_' + Date.now() + '.jpg';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
 </script>
 </body>
 </html>

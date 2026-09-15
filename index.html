@@ -605,7 +605,7 @@ function watchMessages(roomId, viewRole){
       if (m.type === 'image' && m.imageData) {
         bubble.innerHTML = senderLabel + '<img src="' + m.imageData + '" onclick="window.open(this.src)">';
       } else {
-        bubble.innerHTML = senderLabel + escapeHtml(m.text || '');
+        bubble.innerHTML = senderLabel + linkify(escapeHtml(m.text || ''));
       }
       box.appendChild(bubble);
     });
@@ -973,6 +973,21 @@ function escapeHtml(str){
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
+}
+
+// 메시지 안의 링크(URL)를 클릭 가능하게 변환 (escapeHtml로 이스케이프된 텍스트에 적용)
+function linkify(escapedText){
+  const urlRegex = /(https?:\/\/[^\s<]+)/g;
+  return escapedText.replace(urlRegex, (url) => {
+    let trail = '';
+    let cleanUrl = url;
+    const trailMatch = cleanUrl.match(/([)\].,!?;:'"]+)$/);
+    if (trailMatch) {
+      trail = trailMatch[1];
+      cleanUrl = cleanUrl.slice(0, -trail.length);
+    }
+    return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;word-break:break-all;">${cleanUrl}</a>${trail}`;
+  });
 }
 </script>
 </body>
